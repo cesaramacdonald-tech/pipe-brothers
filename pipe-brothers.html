@@ -238,7 +238,7 @@ function doWrench(p) {
       v.hitFlash = 0.3;
       const dx=v.x-p.x, dy=v.y-p.y, l=Math.hypot(dx,dy)||1;
       v.kx=(dx/l)*64; v.ky=(dy/l)*64;
-      if (v.hp<=0) Audio.vandalDeath(); else Audio.vandalHit();
+      if (v.hp<=0) { sharedHP = clamp(sharedHP+15, 0, 100); Audio.vandalDeath(); } else Audio.vandalHit();
     }
   }
 }
