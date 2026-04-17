@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Pipe Brothers</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  background:#060610;
+  display:flex; flex-direction:column;
+  align-items:center; justify-content:center;
+  min-height:100vh;
+  font-family:'Courier New',monospace;
+}
+canvas { display:block; border:2px solid #222; }
+#hint { color:#444; font-size:11px; margin-top:6px; letter-spacing:1px; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hint">WASD/ARROWS: move &nbsp;|&nbsp; TAB: switch brother &nbsp;|&nbsp; SPACE: wrench</div>
+<script>
+// ── CONSTANTS ──────────────────────────────────────────────────────────────
+const TS = 32, COLS = 25, ROWS = 19;
+const W = COLS * TS, H = ROWS * TS; // 800 × 608
+const WALL = 0, FLOOR = 1;
+const STREET_ROWS = [2,7,12,16];
+const STREET_COLS = [3,9,15,21];
+
+// ── CANVAS ─────────────────────────────────────────────────────────────────
+const canvas = document.getElementById('game');
+canvas.width = W; canvas.height = H;
+const ctx = canvas.getContext('2d');
+
+// ── CITY MAP ───────────────────────────────────────────────────────────────
+const MAP = [];
+for (let r = 0; r < ROWS; r++) {
+  MAP[r] = [];
+  for (let c = 0; c < COLS; c++) {
+    MAP[r][c] = (STREET_ROWS.includes(r) || STREET_COLS.includes(c)) ? FLOOR : WALL;
+  }
+}
+
+// ── PIPE NODES (16 street intersections) ───────────────────────────────────
+// Index layout (row × col):
+//   0  1  2  3   ← row 2
+//   4  5  6  7   ← row 7
+//   8  9 10 11   ← row 12
+//  12 13 14 15   ← row 16
+const PIPE_NODES = [];
+for (const r of STREET_ROWS)
+  for (const c of STREET_COLS)
+    PIPE_NODES.push({c, r});
+
+// ── LEVEL DEFINITIONS ──────────────────────────────────────────────────────
+const LEVEL_DEFS = [
+  {
+    drainRate: 2.5,
+    leakingNodes: [1, 5, 10],
+    fires: [{c:6,r:7}],
+    vandals: [{c:9,r:7, patrol:[{c:9,r:7},{c:9,r:12}]}],
+    p1:{c:3,r:2}, p2:{c:15,r:7},
+  },
+  {
+    drainRate: 3.5,
+    leakingNodes: [0,2,7,11,14],
+    fires: [{c:6,r:2},{c:18,r:7},{c:18,r:16}],
+    vandals: [
+      {c:3,r:12, patrol:[{c:3,r:12},{c:9,r:12}]},
+      {c:21,r:7, patrol:[{c:21,r:7},{c:21,r:12}]},
+    ],
+    p1:{c:3,r:7}, p2:{c:21,r:2},
+  },
+  {
+    drainRate: 5,
+    leakingNodes: [0,1,2,3,5,8,11,14],
+    fires: [{c:6,r:2},{c:12,r:2},{c:6,r:12},{c:18,r:12},{c:12,r:16}],
+    vandals: [
+      {c:3,r:2,  patrol:[{c:3,r:2},{c:3,r:7}]},
+      {c:15,r:12,patrol:[{c:15,r:12},{c:21,r:12}]},
+      {c:9,r:16, patrol:[{c:9,r:16},{c:15,r:16}]},
+    ],
+    p1:{c:3,r:2}, p2:{c:21,r:16},
+  },
+];
+
+// ── INPUT ──────────────────────────────────────────────────────────────────
+const keys = {}, jp = {};
+window.addEventListener('keydown', e => {
+  if (!keys[e.key]) jp[e.key] = true;
+  keys[e.key] = true;
+  if ([' ','Tab','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key))
+    e.preventDefault();
+});
+window.addEventListener('keyup', e => { delete keys[e.key]; });
+function pressed(k) { if (jp[k]) { delete jp[k]; return true; } return false; }
+
+// ── HELPERS ────────────────────────────────────────────────────────────────
+function tc(c, r) { return {x: c*TS + TS/2, y: r*TS + TS/2}; }
+function dist(a, b) { return Math.hypot(a.x-b.x, a.y-b.y); }
+function clamp(v,mn,mx) { return Math.max(mn, Math.min(mx, v)); }
+
+// ── GAME STATE ─────────────────────────────────────────────────────────────
+let gstate, lvlIdx, sharedHP, score, t, lvlT, introT;
+let players, pipes, fires, vandals, activeP, swings;
+
+const S = {TITLE:'T', PLAYING:'P', WIN:'W', OVER:'O', VICTORY:'V'};
+
+// ── INIT ───────────────────────────────────────────────────────────────────
+function initGame() {
+  lvlIdx = 0; score = 0; sharedHP = 100; t = 0;
+  gstate = S.TITLE;
+}
+
+function initLevel(i) {
+  const def = LEVEL_DEFS[i];
+  lvlT = 0; introT = 2.5; swings = [];
+
+  // Pipes
+  pipes = PIPE_NODES.slice(0,16).map((n, idx) => ({
+    c: n.c, r: n.r,
+    x: n.c*TS+TS/2, y: n.r*TS+TS/2,
+    state: def.leakingNodes.includes(idx) ? 'LEAKING' : 'NORMAL',
+    closeFlash: 0,
+  }));
+
+  // Fires
+  fires = def.fires.map(f => {
+    const {x,y} = tc(f.c,f.r);
+    return {c:f.c, r:f.r, x, y, active:true, extT:0};
+  });
+
+  // Vandals
+  vandals = def.vandals.map(v => {
+    const {x,y} = tc(v.c,v.r);
+    return {
+      x, y, hp:3,
+      patrol: v.patrol.map(p => tc(p.c,p.r)),
+      pi:0, mode:'patrol', speed:50,
+      hitFlash:0, kx:0, ky:0,
+    };
+  });
+
+  // Players
+  const {x:x1,y:y1} = tc(def.p1.c,def.p1.r);
+  const {x:x2,y:y2} = tc(def.p2.c,def.p2.r);
+  players = [
+    {x:x1,y:y1,name:'Rex',col:'#4fc3f7',hat:'#0277bd',face:0,sp:100},
+    {x:x2,y:y2,name:'Max',col:'#ef9a9a',hat:'#b71c1c',face:Math.PI,sp:100},
+  ];
+  activeP = 0;
+  gstate = S.PLAYING;
+}
+
+// ── COLLISION ──────────────────────────────────────────────────────────────
+function canWalk(px, py) {
+  const R = 10;
+  for (const [dx,dy] of [[-R,-R],[R,-R],[-R,R],[R,R]]) {
+    const tc = Math.floor((px+dx)/TS), tr = Math.floor((py+dy)/TS);
+    if (tc<0||tc>=COLS||tr<0||tr>=ROWS||MAP[tr][tc]===WALL) return false;
+  }
+  return true;
+}
+
+// ── WRENCH ─────────────────────────────────────────────────────────────────
+function doWrench(p) {
+  swings.push({x:p.x, y:p.y, a:p.face, t:0.22});
+
+  // Close nearest leaking pipe
+  let best=null, bd=46;
+  for (const pipe of pipes) {
+    if (pipe.state !== 'LEAKING') continue;
+    const d = dist(p, pipe);
+    if (d < bd) { best=pipe; bd=d; }
+  }
+  if (best) { best.state='CLOSED'; best.closeFlash=0.5; return; }
+
+  // Hit nearest vandal
+  for (const v of vandals) {
+    if (v.hp<=0) continue;
+    if (dist(p,v)<46) {
+      v.hp--;
+      v.hitFlash = 0.3;
+      const dx=v.x-p.x, dy=v.y-p.y, l=Math.hypot(dx,dy)||1;
+      v.kx=(dx/l)*64; v.ky=(dy/l)*64;
+    }
+  }
+}
+
+// ── UPDATE ─────────────────────────────────────────────────────────────────
+function update(dt) {
+  t += dt;
+  if (gstate !== S.PLAYING) { menuInput(); return; }
+
+  lvlT += dt;
+  if (introT > 0) introT -= dt;
+
+  // --- Input ---
+  if (pressed('Tab')) activeP = 1-activeP;
+  if (pressed(' ') || pressed('Enter')) doWrench(players[activeP]);
+
+  const p = players[activeP];
+  let dx=0, dy=0;
+  if (keys['ArrowLeft'] ||keys['a']||keys['A']) dx=-1;
+  if (keys['ArrowRight']||keys['d']||keys['D']) dx= 1;
+  if (keys['ArrowUp']   ||keys['w']||keys['W']) dy=-1;
+  if (keys['ArrowDown'] ||keys['s']||keys['S']) dy= 1;
+  if (dx||dy) {
+    const l=Math.hypot(dx,dy);
+    dx/=l; dy/=l;
+    p.face = Math.atan2(dy,dx);
+    const nx=p.x+dx*p.sp*dt, ny=p.y+dy*p.sp*dt;
+    if (canWalk(nx,p.y)) p.x=nx;
+    if (canWalk(p.x,ny)) p.y=ny;
+    p.x=clamp(p.x,10,W-10); p.y=clamp(p.y,10,H-10);
+  }
+
+  // --- Vandals ---
+  const def = LEVEL_DEFS[lvlIdx];
+  for (const v of vandals) {
+    if (v.hp<=0) continue;
+    if (v.hitFlash>0) v.hitFlash-=dt;
+
+    // knockback decay
+    v.x+=v.kx*dt*3; v.y+=v.ky*dt*3;
+    v.kx*=Math.max(0,1-10*dt); v.ky*=Math.max(0,1-10*dt);
+
+    // AI: target nearest closed pipe else patrol
+    let targetPt = null;
+    let nearDist = 260;
+    for (const pipe of pipes) {
+      if (pipe.state==='CLOSED') {
+        const d=dist(v,pipe);
+        if (d<nearDist) { nearDist=d; targetPt={x:pipe.x,y:pipe.y,pipe}; }
+      }
+    }
+
+    let goal;
+    if (targetPt) {
+      goal = targetPt;
+      v.mode='target';
+      if (nearDist < 14) { targetPt.pipe.state='LEAKING'; v.mode='patrol'; }
+    } else {
+      v.mode='patrol';
+      goal = v.patrol[v.pi];
+      if (dist(v,goal)<8) v.pi=(v.pi+1)%v.patrol.length;
+    }
+
+    const vdx=goal.x-v.x, vdy=goal.y-v.y, vd=Math.hypot(vdx,vdy);
+    if (vd>2) { v.x+=vdx/vd*v.speed*dt; v.y+=vdy/vd*v.speed*dt; }
+
+    // damage players
+    for (const pl of players)
+      if (dist(v,pl)<22) sharedHP-=6*dt;
+  }
+
+  // --- HP drain ---
+  for (const pipe of pipes) {
+    if (pipe.state==='LEAKING') sharedHP-=def.drainRate*dt;
+    if (pipe.closeFlash>0) pipe.closeFlash-=dt;
+  }
+  for (const fire of fires) {
+    if (!fire.active) continue;
+    for (const pl of players)
+      if (dist(pl,fire)<26) sharedHP-=4*dt;
+
+    // extinguish if nearby closed pipe
+    const near = pipes.some(p=>p.state==='CLOSED'&&Math.abs(p.c-fire.c)<=3&&Math.abs(p.r-fire.r)<=3);
+    if (near) { fire.extT+=dt; if (fire.extT>=1.5) fire.active=false; }
+    else fire.extT=0;
+  }
+
+  sharedHP = clamp(sharedHP,0,100);
+  if (sharedHP<=0) { gstate=S.OVER; return; }
+
+  // swings decay
+  swings = swings.filter(s=>{ s.t-=dt; return s.t>0; });
+
+  // win check
+  const anyLeak = pipes.some(p=>p.state==='LEAKING');
+  const anyFire = fires.some(f=>f.active);
+  if (!anyLeak && !anyFire) {
+    const bonus = Math.max(0,Math.floor((180-lvlT)*3));
+    score += bonus + Math.floor(sharedHP);
+    gstate = lvlIdx>=LEVEL_DEFS.length-1 ? S.VICTORY : S.WIN;
+  }
+}
+
+function menuInput() {
+  if (gstate===S.TITLE && (pressed('Enter')||pressed(' ')))  { initLevel(0); }
+  if (gstate===S.WIN   && (pressed('Enter')||pressed(' ')))  { lvlIdx++; initLevel(lvlIdx); }
+  if (gstate===S.OVER  && (pressed('r')||pressed('R')))       { sharedHP=100; initLevel(lvlIdx); }
+  if (gstate===S.VICTORY&&(pressed('Enter')||pressed(' '))) { initGame(); }
+}
+
+// ── RENDER ─────────────────────────────────────────────────────────────────
+function render() {
+  ctx.clearRect(0,0,W,H);
+  if (gstate===S.TITLE) { drawTitle(); return; }
+  drawMap(); drawPipeNet(); drawPipes(); drawFires();
+  drawVandals(); drawPlayers(); drawSwings(); drawHUD();
+  if (gstate===S.WIN)     drawOverlay('LEVEL CLEAR!','#66bb6a',`Score: ${score}  HP: ${Math.ceil(sharedHP)}`,'ENTER — next level');
+  if (gstate===S.OVER)    drawOverlay('PIPES BURST!','#ef5350',`Score: ${score}  Level: ${lvlIdx+1}`,'R — retry');
+  if (gstate===S.VICTORY) { drawOverlay('CITY SAVED!','#ffd54f',`FINAL SCORE: ${score}`,'ENTER — play again'); }
+  if (gstate===S.PLAYING && introT>0) drawIntro();
+}
+
+function drawMap() {
+  for (let r=0;r<ROWS;r++) for (let c=0;c<COLS;c++) {
+    if (MAP[r][c]===WALL) {
+      ctx.fillStyle='#181828'; ctx.fillRect(c*TS,r*TS,TS,TS);
+      // window dots
+      if (c%2===0&&r%3===1) {
+        ctx.fillStyle='rgba(255,240,160,0.12)';
+        ctx.fillRect(c*TS+6,r*TS+6,8,8);
+        ctx.fillRect(c*TS+18,r*TS+6,8,8);
+      }
+      ctx.strokeStyle='#20203a'; ctx.lineWidth=1;
+      ctx.strokeRect(c*TS+.5,r*TS+.5,TS-1,TS-1);
+    } else {
+      ctx.fillStyle='#252535'; ctx.fillRect(c*TS,r*TS,TS,TS);
+    }
+  }
+}
+
+function drawPipeNet() {
+  ctx.strokeStyle='#2e4060'; ctx.lineWidth=5; ctx.lineCap='round';
+  // horizontal segments between consecutive street-col intersections per street row
+  for (const r of STREET_ROWS) {
+    for (let i=0;i<STREET_COLS.length-1;i++) {
+      ctx.beginPath();
+      ctx.moveTo(STREET_COLS[i]*TS+TS/2, r*TS+TS/2);
+      ctx.lineTo(STREET_COLS[i+1]*TS+TS/2, r*TS+TS/2);
+      ctx.stroke();
+    }
+  }
+  // vertical segments
+  for (const c of STREET_COLS) {
+    for (let i=0;i<STREET_ROWS.length-1;i++) {
+      ctx.beginPath();
+      ctx.moveTo(c*TS+TS/2, STREET_ROWS[i]*TS+TS/2);
+      ctx.lineTo(c*TS+TS/2, STREET_ROWS[i+1]*TS+TS/2);
+      ctx.stroke();
+    }
+  }
+}
+
+function drawPipes() {
+  for (const p of pipes) {
+    if (p.state==='NORMAL') {
+      ctx.fillStyle='#3a4a5c';
+      ctx.beginPath(); ctx.arc(p.x,p.y,5,0,Math.PI*2); ctx.fill();
+      continue;
+    }
+    if (p.state==='LEAKING') {
+      const pulse=0.7+0.3*Math.sin(t*7+p.c);
+      ctx.shadowBlur=14*pulse; ctx.shadowColor='#29b6f6';
+      ctx.fillStyle='#29b6f6';
+      ctx.beginPath(); ctx.arc(p.x,p.y,7,0,Math.PI*2); ctx.fill();
+      ctx.shadowBlur=0;
+      // animated water drops
+      for (let d=0;d<3;d++) {
+        const off=(t*1.8+d*0.33)%1;
+        const dy=off*30, alpha=Math.max(0,1-off);
+        ctx.fillStyle=`rgba(41,182,246,${alpha})`;
+        ctx.beginPath();
+        ctx.arc(p.x+Math.sin(t*4+d)*3, p.y+dy, 2.5*(1-off*0.5), 0, Math.PI*2);
+        ctx.fill();
+      }
+    } else { // CLOSED
+      const flash = p.closeFlash>0 ? 1 : 0.6+0.4*Math.sin(t*3);
+      ctx.shadowBlur=10*flash; ctx.shadowColor='#66bb6a';
+      ctx.fillStyle = p.closeFlash>0 ? '#ffffff' : '#66bb6a';
+      ctx.beginPath(); ctx.arc(p.x,p.y,7,0,Math.PI*2); ctx.fill();
+      ctx.shadowBlur=0;
+      if (p.closeFlash<=0) {
+        ctx.strokeStyle='#fff'; ctx.lineWidth=2;
+        ctx.beginPath();
+        ctx.moveTo(p.x-4,p.y+1); ctx.lineTo(p.x-1,p.y+4); ctx.lineTo(p.x+4,p.y-3);
+        ctx.stroke();
+      }
+    }
+  }
+}
+
+function drawFires() {
+  for (const f of fires) {
+    if (!f.active) continue;
+    const flk=0.75+0.25*Math.sin(t*11+f.c*7);
+    const rr=15*flk;
+    const g=ctx.createRadialGradient(f.x,f.y,0,f.x,f.y,rr+6);
+    g.addColorStop(0,'rgba(255,230,50,0.95)');
+    g.addColorStop(0.35,'rgba(255,80,0,0.8)');
+    g.addColorStop(1,'rgba(200,0,0,0)');
+    ctx.fillStyle=g;
+    ctx.beginPath(); ctx.arc(f.x,f.y,rr+6,0,Math.PI*2); ctx.fill();
+    // steam when dying
+    if (f.extT>0) {
+      const sa=f.extT/1.5;
+      ctx.fillStyle=`rgba(130,200,255,${sa*0.5})`;
+      ctx.beginPath(); ctx.arc(f.x,f.y-6,10*sa,0,Math.PI*2); ctx.fill();
+    }
+  }
+}
+
+function drawVandals() {
+  for (const v of vandals) {
+    if (v.hp<=0) continue;
+    const col = v.hitFlash>0 ? '#fff' : (v.mode==='target'?'#f3e5f5':'#ce93d8');
+    ctx.shadowBlur=8; ctx.shadowColor='#9c27b0';
+    ctx.fillStyle=col;
+    ctx.beginPath(); ctx.arc(v.x,v.y,11,0,Math.PI*2); ctx.fill();
+    ctx.shadowBlur=0;
+    // skull overlay
+    ctx.fillStyle='#1a0a2e';
+    ctx.beginPath(); ctx.arc(v.x,v.y-2,5,0,Math.PI*2); ctx.fill();
+    ctx.fillRect(v.x-4,v.y+1,9,5);
+    // HP pips
+    for (let i=0;i<v.hp;i++) {
+      ctx.fillStyle='#e040fb';
+      ctx.fillRect(v.x-9+i*9,v.y-20,7,4);
+    }
+  }
+}
+
+function drawPlayers() {
+  // draw inactive first (dimmed), then active
+  const order = [1-activeP, activeP];
+  for (const idx of order) {
+    const p=players[idx], active=idx===activeP;
+    ctx.globalAlpha = active?1:0.5;
+
+    if (active) {
+      const pulse=0.5+0.5*Math.sin(t*5);
+      ctx.shadowBlur=18*pulse; ctx.shadowColor=p.col;
+    }
+
+    // body
+    ctx.fillStyle=p.col;
+    ctx.beginPath(); ctx.arc(p.x,p.y+2,10,0,Math.PI*2); ctx.fill();
+
+    // hard hat (offset in facing direction)
+    const hx=p.x+Math.cos(p.face)*5, hy=p.y+Math.sin(p.face)*5-5;
+    ctx.fillStyle=p.hat;
+    ctx.beginPath(); ctx.ellipse(hx,hy,8,5,p.face,0,Math.PI*2); ctx.fill();
+
+    ctx.shadowBlur=0; ctx.globalAlpha=1;
+
+    // name tag
+    if (active) {
+      ctx.fillStyle='rgba(0,0,0,0.55)';
+      ctx.fillRect(p.x-12,p.y-24,24,12);
+      ctx.fillStyle=p.col;
+      ctx.font='bold 9px Courier New'; ctx.textAlign='center';
+      ctx.fillText(p.name,p.x,p.y-15);
+      ctx.textAlign='left';
+    }
+  }
+}
+
+function drawSwings() {
+  for (const s of swings) {
+    const prog=1-s.t/0.22;
+    ctx.globalAlpha=Math.max(0,1-prog*1.5);
+    ctx.strokeStyle='#ffd54f'; ctx.lineWidth=3;
+    ctx.beginPath();
+    ctx.arc(s.x,s.y,18+prog*14,s.a-0.65,s.a+0.65);
+    ctx.stroke();
+    ctx.globalAlpha=1;
+  }
+}
+
+function drawHUD() {
+  // HP bar
+  ctx.fillStyle='rgba(0,0,0,0.65)'; ctx.fillRect(8,8,204,22);
+  const hf=sharedHP/100;
+  ctx.fillStyle=hf>0.6?'#4caf50':hf>0.3?'#ff9800':'#f44336';
+  ctx.fillRect(10,10,hf*200,18);
+  // segments
+  ctx.strokeStyle='rgba(0,0,0,0.45)'; ctx.lineWidth=1;
+  for (let i=1;i<10;i++) {
+    ctx.beginPath(); ctx.moveTo(10+i*20,10); ctx.lineTo(10+i*20,28); ctx.stroke();
+  }
+  ctx.fillStyle='#fff'; ctx.font='bold 10px Courier New';
+  ctx.fillText(`HP ${Math.ceil(sharedHP)}`,14,23);
+
+  // Level + score
+  ctx.font='bold 11px Courier New';
+  const lbl=`LVL ${lvlIdx+1}  SCORE:${score}`;
+  const lw=ctx.measureText(lbl).width;
+  ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(W/2-lw/2-6,8,lw+12,22);
+  ctx.fillStyle='#e2e8f0'; ctx.textAlign='center';
+  ctx.fillText(lbl,W/2,23); ctx.textAlign='left';
+
+  // Active player chip
+  const ap=players[activeP];
+  const al=`► ${ap.name}`;
+  const aw=ctx.measureText(al).width;
+  ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(W-aw-18,8,aw+12,22);
+  ctx.fillStyle=ap.col; ctx.fillText(al,W-aw-12,23);
+
+  // Leak warning
+  const lc=pipes.filter(p=>p.state==='LEAKING').length;
+  if (lc>0) {
+    ctx.fillStyle='rgba(0,0,0,0.5)'; ctx.fillRect(8,H-28,180,20);
+    ctx.fillStyle='#29b6f6'; ctx.font='11px Courier New';
+    ctx.fillText(`\u25bc ${lc} pipe${lc>1?'s':''} leaking — use SPACE`,12,H-13);
+  }
+  const vc=vandals.filter(v=>v.hp>0).length;
+  if (vc>0) {
+    ctx.fillStyle='rgba(0,0,0,0.5)'; ctx.fillRect(8,H-52,160,20);
+    ctx.fillStyle='#ce93d8'; ctx.font='11px Courier New';
+    ctx.fillText(`\u25cf ${vc} vandal${vc>1?'s':''} active`,12,H-37);
+  }
+}
+
+function drawIntro() {
+  const a = introT>0.5 ? 1 : introT/0.5;
+  ctx.fillStyle=`rgba(0,0,0,${a*0.72})`;
+  ctx.fillRect(0,0,W,H);
+  ctx.globalAlpha=a;
+  ctx.textAlign='center';
+  ctx.shadowBlur=20; ctx.shadowColor='#4fc3f7';
+  ctx.fillStyle='#e0f7fa'; ctx.font='bold 40px Courier New';
+  ctx.fillText(`LEVEL ${lvlIdx+1}`,W/2,H/2-18);
+  ctx.shadowBlur=0;
+  const d=LEVEL_DEFS[lvlIdx];
+  ctx.fillStyle='#90a4ae'; ctx.font='14px Courier New';
+  ctx.fillText(`${d.leakingNodes.length} leaks  ·  ${d.fires.length} fires  ·  ${d.vandals.length} vandals`,W/2,H/2+22);
+  ctx.textAlign='left'; ctx.globalAlpha=1;
+}
+
+function drawTitle() {
+  ctx.fillStyle='#060610'; ctx.fillRect(0,0,W,H);
+  // city silhouette
+  ctx.fillStyle='#0d0d22';
+  for (let i=0;i<13;i++) {
+    const bx=i*64, bh=60+(i*41%90);
+    ctx.fillRect(bx,H-80-bh,56,bh+80);
+  }
+  // animated pipe lines
+  ctx.strokeStyle='rgba(41,182,246,0.15)'; ctx.lineWidth=5;
+  for (const ry of [H*0.32,H*0.68]) {
+    ctx.beginPath(); ctx.moveTo(0,ry); ctx.lineTo(W,ry); ctx.stroke();
+  }
+  // leaking drops on title pipes
+  for (let d=0;d<6;d++) {
+    const off=(t*1.5+d*0.16)%1;
+    const dropX=50+d*130, dropY=H*0.32+off*40;
+    ctx.fillStyle=`rgba(41,182,246,${(1-off)*0.6})`;
+    ctx.beginPath(); ctx.arc(dropX,dropY,3*(1-off*0.5),0,Math.PI*2); ctx.fill();
+  }
+
+  // title
+  ctx.textAlign='center';
+  const tp=0.85+0.15*Math.sin(t*2);
+  ctx.shadowBlur=30*tp; ctx.shadowColor='#29b6f6';
+  ctx.fillStyle='#e0f7fa'; ctx.font='bold 58px Courier New';
+  ctx.fillText('PIPE',W/2,H/2-22);
+  ctx.fillStyle='#ff7043'; ctx.shadowColor='#bf360c';
+  ctx.fillText('BROTHERS',W/2,H/2+42);
+  ctx.shadowBlur=0;
+
+  ctx.fillStyle='#78909c'; ctx.font='13px Courier New';
+  ctx.fillText('Stop the leaks. Fight the Vandals. Save the city.',W/2,H/2+80);
+
+  const blink=Math.sin(t*3)>0;
+  ctx.fillStyle=blink?'#fff':'#888'; ctx.font='bold 15px Courier New';
+  ctx.fillText('PRESS ENTER TO START',W/2,H/2+118);
+
+  ctx.fillStyle='#37474f'; ctx.font='11px Courier New';
+  ctx.fillText('WASD/ARROWS: move  |  TAB: switch brother  |  SPACE: wrench',W/2,H-22);
+  ctx.textAlign='left';
+}
+
+function drawOverlay(title, col, body, footer) {
+  ctx.fillStyle='rgba(0,0,0,0.78)'; ctx.fillRect(0,0,W,H);
+  ctx.textAlign='center';
+  ctx.shadowBlur=24; ctx.shadowColor=col;
+  ctx.fillStyle=col; ctx.font='bold 50px Courier New';
+  ctx.fillText(title,W/2,H/2-36);
+  ctx.shadowBlur=0;
+  ctx.fillStyle='#eceff1'; ctx.font='18px Courier New';
+  ctx.fillText(body,W/2,H/2+14);
+  const blink=Math.sin(t*3)>0;
+  ctx.fillStyle=blink?'#fff':'#777'; ctx.font='bold 13px Courier New';
+  ctx.fillText(footer,W/2,H/2+58);
+  ctx.textAlign='left';
+}
+
+// ── GAME LOOP ───────────────────────────────────────────────────────────────
+let last=0;
+function loop(ts) {
+  const dt=Math.min((ts-last)/1000,0.05);
+  last=ts; update(dt); render();
+  requestAnimationFrame(loop);
+}
+initGame();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
