@@ -100,9 +100,62 @@ function tc(c, r) { return {x: c*TS + TS/2, y: r*TS + TS/2}; }
 function dist(a, b) { return Math.hypot(a.x-b.x, a.y-b.y); }
 function clamp(v,mn,mx) { return Math.max(mn, Math.min(mx, v)); }
 
+// ── AUDIO ──────────────────────────────────────────────────────────────────
+const Audio = (() => {
+  let ctx = null;
+  function ac() {
+    if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+    if (ctx.state === 'suspended') ctx.resume();
+    return ctx;
+  }
+  function noise(dur, freq, type='bandpass', vol=0.3, q=1) {
+    const a = ac(), len = Math.ceil(a.sampleRate * dur);
+    const buf = a.createBuffer(1, len, a.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i=0;i<len;i++) d[i]=Math.random()*2-1;
+    const src = a.createBufferSource(); src.buffer = buf;
+    const flt = a.createBiquadFilter(); flt.type=type; flt.frequency.value=freq; flt.Q.value=q;
+    const g = a.createGain();
+    g.gain.setValueAtTime(vol, a.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.0001, a.currentTime+dur);
+    src.connect(flt); flt.connect(g); g.connect(a.destination);
+    src.start(); src.stop(a.currentTime+dur+0.05);
+  }
+  function tone(freq, dur, type='sine', vol=0.2, delay=0, freqEnd=null) {
+    const a = ac(), now = a.currentTime;
+    const osc = a.createOscillator(), g = a.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, now+delay);
+    if (freqEnd) osc.frequency.exponentialRampToValueAtTime(freqEnd, now+delay+dur);
+    g.gain.setValueAtTime(0.001, now+delay);
+    g.gain.linearRampToValueAtTime(vol, now+delay+0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, now+delay+dur);
+    osc.connect(g); g.connect(a.destination);
+    osc.start(now+delay); osc.stop(now+delay+dur+0.05);
+  }
+  return {
+    wrench()        { noise(0.07,1400,'highpass',0.3); tone(110,0.07,'sawtooth',0.2); },
+    pipeClose()     { tone(380,0.22,'sine',0.28,0,130); noise(0.04,700,'bandpass',0.18); },
+    vandalHit()     { noise(0.09,500,'bandpass',0.38); tone(85,0.09,'sawtooth',0.18); },
+    vandalDeath()   { tone(260,0.42,'sawtooth',0.22,0,38); },
+    vandalReopen()  { tone(880,0.07,'square',0.16); tone(660,0.07,'square',0.16,0.11); },
+    fireExtinguish(){ noise(0.45,2800,'bandpass',0.28,0.6); tone(480,0.38,'sine',0.1,0,75); },
+    waterDrip()     { tone(620,0.1,'sine',0.07,0,310); },
+    switchPlayer()  { tone(520,0.055,'sine',0.11); tone(740,0.055,'sine',0.09,0.07); },
+    hpLow()         { tone(900,0.045,'square',0.1); },
+    levelStart()    { tone(330,0.1,'square',0.13); tone(440,0.12,'square',0.13,0.13); },
+    levelClear()    {
+      [262,330,392,523].forEach((f,i)=>tone(f,0.22,'sine',0.18,i*0.09));
+      [523,659,784].forEach(f=>tone(f,0.5,'sine',0.1,0.45));
+    },
+    gameOver()      { [392,330,262,196].forEach((f,i)=>tone(f,0.28,'sine',0.16,i*0.17)); },
+  };
+})();
+
 // ── GAME STATE ─────────────────────────────────────────────────────────────
 let gstate, lvlIdx, sharedHP, score, t, lvlT, introT;
 let players, pipes, fires, vandals, activeP, swings;
+let hpWarnT = 0, dripT = 0;
 
 const S = {TITLE:'T', PLAYING:'P', WIN:'W', OVER:'O', VICTORY:'V'};
 
@@ -114,7 +167,8 @@ function initGame() {
 
 function initLevel(i) {
   const def = LEVEL_DEFS[i];
-  lvlT = 0; introT = 2.5; swings = [];
+  lvlT = 0; introT = 2.5; swings = []; hpWarnT = 0; dripT = 0;
+  Audio.levelStart();
 
   // Pipes
   pipes = PIPE_NODES.slice(0,16).map((n, idx) => ({
@@ -165,6 +219,7 @@ function canWalk(px, py) {
 // ── WRENCH ─────────────────────────────────────────────────────────────────
 function doWrench(p) {
   swings.push({x:p.x, y:p.y, a:p.face, t:0.22});
+  Audio.wrench();
 
   // Close nearest leaking pipe
   let best=null, bd=46;
@@ -173,7 +228,7 @@ function doWrench(p) {
     const d = dist(p, pipe);
     if (d < bd) { best=pipe; bd=d; }
   }
-  if (best) { best.state='CLOSED'; best.closeFlash=0.5; return; }
+  if (best) { best.state='CLOSED'; best.closeFlash=0.5; Audio.pipeClose(); return; }
 
   // Hit nearest vandal
   for (const v of vandals) {
@@ -183,6 +238,7 @@ function doWrench(p) {
       v.hitFlash = 0.3;
       const dx=v.x-p.x, dy=v.y-p.y, l=Math.hypot(dx,dy)||1;
       v.kx=(dx/l)*64; v.ky=(dy/l)*64;
+      if (v.hp<=0) Audio.vandalDeath(); else Audio.vandalHit();
     }
   }
 }
@@ -196,7 +252,7 @@ function update(dt) {
   if (introT > 0) introT -= dt;
 
   // --- Input ---
-  if (pressed('Tab')) activeP = 1-activeP;
+  if (pressed('Tab')) { activeP = 1-activeP; Audio.switchPlayer(); }
   if (pressed(' ') || pressed('Enter')) doWrench(players[activeP]);
 
   const p = players[activeP];
@@ -239,7 +295,7 @@ function update(dt) {
     if (targetPt) {
       goal = targetPt;
       v.mode='target';
-      if (nearDist < 14) { targetPt.pipe.state='LEAKING'; v.mode='patrol'; }
+      if (nearDist < 14) { targetPt.pipe.state='LEAKING'; v.mode='patrol'; Audio.vandalReopen(); }
     } else {
       v.mode='patrol';
       goal = v.patrol[v.pi];
@@ -266,12 +322,22 @@ function update(dt) {
 
     // extinguish if nearby closed pipe
     const near = pipes.some(p=>p.state==='CLOSED'&&Math.abs(p.c-fire.c)<=3&&Math.abs(p.r-fire.r)<=3);
-    if (near) { fire.extT+=dt; if (fire.extT>=1.5) fire.active=false; }
+    if (near) { fire.extT+=dt; if (fire.extT>=1.5) { fire.active=false; Audio.fireExtinguish(); } }
     else fire.extT=0;
   }
 
   sharedHP = clamp(sharedHP,0,100);
-  if (sharedHP<=0) { gstate=S.OVER; return; }
+  if (sharedHP<=0) { gstate=S.OVER; Audio.gameOver(); return; }
+
+  // HP low warning beep (every 1.2s when HP < 25)
+  hpWarnT -= dt;
+  if (sharedHP < 25 && hpWarnT <= 0) { Audio.hpLow(); hpWarnT = 1.2; }
+
+  // Dripping water sound when pipes are leaking
+  dripT -= dt;
+  if (dripT <= 0 && pipes.some(p=>p.state==='LEAKING')) {
+    Audio.waterDrip(); dripT = 0.7 + Math.random()*0.5;
+  }
 
   // swings decay
   swings = swings.filter(s=>{ s.t-=dt; return s.t>0; });
@@ -282,6 +348,7 @@ function update(dt) {
   if (!anyLeak && !anyFire) {
     const bonus = Math.max(0,Math.floor((180-lvlT)*3));
     score += bonus + Math.floor(sharedHP);
+    Audio.levelClear();
     gstate = lvlIdx>=LEVEL_DEFS.length-1 ? S.VICTORY : S.WIN;
   }
 }
