@@ -143,6 +143,7 @@ const keys = {}, jp = {};
 window.addEventListener('keydown', e => {
   if (!keys[e.key]) jp[e.key] = true;
   keys[e.key] = true;
+  Audio.resume();
   if ([' ','Tab','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key))
     e.preventDefault();
 });
@@ -204,6 +205,28 @@ const Audio = (() => {
     },
     gameOver()      { [392,330,262,196].forEach((f,i)=>tone(f,0.28,'sine',0.16,i*0.17)); },
     toolkit()       { tone(660,0.1,'sine',0.2); tone(880,0.15,'sine',0.18,0.1); tone(1100,0.2,'sine',0.15,0.22); },
+    resume()        { ac(); },
+    droneStart() {
+      if (this._drone) return;
+      const a = ac();
+      this._drone = [];
+      [[55,0.035],[82.4,0.02],[110,0.015],[165,0.01]].forEach(([f,v]) => {
+        const osc = a.createOscillator(), g = a.createGain();
+        osc.type = 'sine'; osc.frequency.value = f; g.gain.value = v;
+        osc.connect(g); g.connect(a.destination); osc.start();
+        this._drone.push({osc, g});
+      });
+    },
+    droneStop() {
+      if (!this._drone) return;
+      const a = ac();
+      this._drone.forEach(({osc, g}) => {
+        g.gain.setValueAtTime(g.gain.value, a.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.0001, a.currentTime + 1.0);
+        try { osc.stop(a.currentTime + 1.05); } catch(_) {}
+      });
+      this._drone = null;
+    },
   };
 })();
 
@@ -285,6 +308,7 @@ function initGame() {
 }
 
 function initLevel(i) {
+  Audio.droneStop();
   const def = LEVEL_DEFS[i];
   lvlT = 0; introT = 2.5; swings = []; hpWarnT = 0; dripT = 0; pendingWin = false; winDelayT = 0;
   setTimeout(() => Audio.levelStart(), 120);
@@ -507,6 +531,7 @@ function update(dt) {
 
 function menuInput() {
   if (nameEntryActive) return;
+  if (gstate===S.TITLE) Audio.droneStart();
   if (gstate===S.TITLE && (pressed('Enter')||pressed(' ')))  { initLevel(0); }
   if (gstate===S.WIN   && (pressed('Enter')||pressed(' ')))  { lvlIdx++; initLevel(lvlIdx); }
   if (gstate===S.OVER  && (pressed('r')||pressed('R')))       { sharedHP=100; initLevel(lvlIdx); }
@@ -816,39 +841,40 @@ function drawTitle() {
   ctx.fillText('WASD/ARROWS: move  |  TAB: switch brother  |  SPACE: wrench',W/2,H-22);
   ctx.textAlign='left';
 
-  // Leaderboard panel (right side)
-  ctx.fillStyle='rgba(6,6,24,0.88)';
-  ctx.fillRect(442, 44, 350, 290);
+  // Leaderboard panel (upper-left)
+  const LX=8, LY=8, LW=205, LH=260;
+  ctx.fillStyle='rgba(6,6,20,0.82)';
+  ctx.fillRect(LX, LY, LW, LH);
   ctx.strokeStyle='#1a3a5c'; ctx.lineWidth=1;
-  ctx.strokeRect(442, 44, 350, 290);
+  ctx.strokeRect(LX, LY, LW, LH);
 
   ctx.textAlign='center';
-  ctx.shadowBlur=10; ctx.shadowColor='#29b6f6';
-  ctx.fillStyle='#29b6f6'; ctx.font='bold 12px Courier New';
-  ctx.fillText('▲ LIVE LEADERBOARD ▲', 617, 68);
+  ctx.shadowBlur=8; ctx.shadowColor='#29b6f6';
+  ctx.fillStyle='#29b6f6'; ctx.font='bold 10px Courier New';
+  ctx.fillText('▲ LEADERBOARD ▲', LX+LW/2, LY+18);
   ctx.shadowBlur=0;
-
-  ctx.strokeStyle='#1a3a5c'; ctx.lineWidth=1;
-  ctx.beginPath(); ctx.moveTo(452,76); ctx.lineTo(782,76); ctx.stroke();
+  ctx.strokeStyle='#1a3a5c';
+  ctx.beginPath(); ctx.moveTo(LX+4,LY+24); ctx.lineTo(LX+LW-4,LY+24); ctx.stroke();
 
   if (leaderboard.length === 0) {
-    ctx.fillStyle='#37474f'; ctx.font='11px Courier New';
-    ctx.fillText('No scores yet — be the first!', 617, 175);
+    ctx.fillStyle='#37474f'; ctx.font='10px Courier New';
+    ctx.fillText('No scores yet!', LX+LW/2, LY+LH/2);
   } else {
     const rankCol = ['#ffd54f','#b0bec5','#a1887f'];
-    leaderboard.slice(0,9).forEach((e,i) => {
-      const y = 100 + i * 26;
+    leaderboard.slice(0,8).forEach((e,i) => {
+      const y = LY + 40 + i * 27;
       ctx.fillStyle = i<3 ? rankCol[i] : '#546e7a';
-      ctx.font = 'bold 11px Courier New';
-      ctx.textAlign='right'; ctx.fillText(`${i+1}.`, 464, y);
+      ctx.font = 'bold 10px Courier New';
+      ctx.textAlign='right'; ctx.fillText(`${i+1}.`, LX+18, y);
       ctx.textAlign='left';
-      ctx.fillStyle = i===0 ? '#ffd54f' : '#e0f7fa';
-      ctx.fillText((e.player_name||'???').substring(0,10), 472, y);
+      ctx.fillStyle = i===0 ? '#ffd54f' : '#cfd8dc';
+      ctx.font = '10px Courier New';
+      ctx.fillText((e.player_name||'???').substring(0,9), LX+24, y);
       ctx.textAlign='right';
-      ctx.fillStyle='#4fc3f7'; ctx.font='bold 11px Courier New';
-      ctx.fillText(e.score, 748, y);
-      ctx.fillStyle='#37474f'; ctx.font='10px Courier New';
-      ctx.fillText(`L${e.level_reached}`, 782, y);
+      ctx.fillStyle='#4fc3f7'; ctx.font='bold 10px Courier New';
+      ctx.fillText(e.score, LX+LW-24, y);
+      ctx.fillStyle='#455a64'; ctx.font='9px Courier New';
+      ctx.fillText(`L${e.level_reached}`, LX+LW-4, y);
     });
   }
   ctx.textAlign='left';
