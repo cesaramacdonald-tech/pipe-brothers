@@ -174,7 +174,7 @@ const Audio = (() => {
 // ── GAME STATE ─────────────────────────────────────────────────────────────
 let gstate, lvlIdx, sharedHP, score, t, lvlT, introT;
 let players, pipes, fires, vandals, toolkits, activeP, swings;
-let hpWarnT = 0, dripT = 0;
+let hpWarnT = 0, dripT = 0, winDelayT = 0, pendingWin = false;
 
 const S = {TITLE:'T', PLAYING:'P', WIN:'W', OVER:'O', VICTORY:'V'};
 
@@ -186,8 +186,8 @@ function initGame() {
 
 function initLevel(i) {
   const def = LEVEL_DEFS[i];
-  lvlT = 0; introT = 2.5; swings = []; hpWarnT = 0; dripT = 0;
-  Audio.levelStart();
+  lvlT = 0; introT = 2.5; swings = []; hpWarnT = 0; dripT = 0; pendingWin = false; winDelayT = 0;
+  setTimeout(() => Audio.levelStart(), 120);
 
   // Pipes
   pipes = PIPE_NODES.slice(0,16).map((n, idx) => ({
@@ -379,14 +379,24 @@ function update(dt) {
   // swings decay
   swings = swings.filter(s=>{ s.t-=dt; return s.t>0; });
 
-  // win check
-  const anyLeak = pipes.some(p=>p.state==='LEAKING');
-  const anyFire = fires.some(f=>f.active);
-  if (!anyLeak && !anyFire) {
-    const bonus = Math.max(0,Math.floor((180-lvlT)*3));
-    score += bonus + Math.floor(sharedHP);
-    Audio.levelClear();
-    gstate = lvlIdx>=LEVEL_DEFS.length-1 ? S.VICTORY : S.WIN;
+  // win check — use a 400ms buffer so pipeClose sound finishes before
+  // levelClear fanfare starts (avoids audio spike causing a frame drop)
+  if (!pendingWin) {
+    const anyLeak = pipes.some(p=>p.state==='LEAKING');
+    const anyFire = fires.some(f=>f.active);
+    if (!anyLeak && !anyFire) {
+      const bonus = Math.max(0,Math.floor((180-lvlT)*3));
+      score += bonus + Math.floor(sharedHP);
+      pendingWin = true;
+      winDelayT = 0.4;
+    }
+  } else {
+    winDelayT -= dt;
+    if (winDelayT <= 0) {
+      pendingWin = false;
+      Audio.levelClear();
+      gstate = lvlIdx>=LEVEL_DEFS.length-1 ? S.VICTORY : S.WIN;
+    }
   }
 }
 
