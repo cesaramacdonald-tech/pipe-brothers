@@ -14,12 +14,48 @@ body {
 }
 canvas { display:block; border:2px solid #222; }
 #hint { color:#444; font-size:11px; margin-top:6px; letter-spacing:1px; }
+#name-entry {
+  display:none; position:fixed; top:50%; left:50%;
+  transform:translate(-50%,-50%);
+  background:rgba(6,6,16,0.97); border:2px solid #29b6f6;
+  padding:28px 36px; text-align:center; z-index:10;
+}
+#name-entry h2 { color:#e0f7fa; font-size:17px; margin-bottom:6px; letter-spacing:2px; }
+#name-entry .sub { color:#78909c; font-size:12px; margin-bottom:16px; }
+#player-name-input {
+  background:#0d0d22; border:1px solid #29b6f6; color:#e0f7fa;
+  font-family:'Courier New',monospace; font-size:18px;
+  padding:8px 12px; text-align:center; width:200px; outline:none;
+  text-transform:uppercase; letter-spacing:2px;
+}
+#submit-score-btn {
+  display:block; margin:14px auto 0; background:#29b6f6; color:#060610;
+  border:none; font-family:'Courier New',monospace; font-size:13px;
+  font-weight:bold; padding:8px 28px; cursor:pointer; letter-spacing:1px;
+}
+#submit-score-btn:hover { background:#4fc3f7; }
+#skip-score-btn {
+  display:block; margin:8px auto 0; background:none; color:#37474f;
+  border:none; font-family:'Courier New',monospace; font-size:11px; cursor:pointer;
+}
 </style>
 </head>
 <body>
 <canvas id="game"></canvas>
+<div id="name-entry">
+  <h2>SUBMIT SCORE</h2>
+  <p class="sub" id="score-display"></p>
+  <input id="player-name-input" type="text" maxlength="12" placeholder="YOUR NAME" autocomplete="off" spellcheck="false" />
+  <button id="submit-score-btn">SUBMIT</button>
+  <button id="skip-score-btn">skip</button>
+</div>
 <div id="hint">WASD/ARROWS: move &nbsp;|&nbsp; TAB: switch brother &nbsp;|&nbsp; SPACE: wrench</div>
 <script>
+// ── SUPABASE ────────────────────────────────────────────────────────────────
+const SB_URL = 'https://icwnwpczkzyqlysygxkd.supabase.co';
+const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imljd253cGN6a3p5cWx5c3lneGtkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY3MTAyNDEsImV4cCI6MjA5MjI4NjI0MX0.5BQbw6_dfThh5UzaL54QqphU_-5uqkSl6xyzMDU-2go';
+const SB_HDR = { 'apikey': SB_KEY, 'Authorization': `Bearer ${SB_KEY}` };
+
 // ── CONSTANTS ──────────────────────────────────────────────────────────────
 const TS = 32, COLS = 25, ROWS = 19;
 const W = COLS * TS, H = ROWS * TS; // 800 × 608
@@ -171,6 +207,68 @@ const Audio = (() => {
   };
 })();
 
+// ── LEADERBOARD ─────────────────────────────────────────────────────────────
+let leaderboard = [], nameEntryActive = false, pendingEntry = null;
+
+async function fetchLeaderboard() {
+  try {
+    const r = await fetch(
+      `${SB_URL}/rest/v1/scores?select=player_name,score,level_reached&order=score.desc&limit=10`,
+      { headers: SB_HDR }
+    );
+    if (r.ok) leaderboard = await r.json();
+  } catch(_) {}
+}
+
+async function submitScore(name, sc, lvl) {
+  try {
+    await fetch(`${SB_URL}/rest/v1/scores`, {
+      method: 'POST',
+      headers: { ...SB_HDR, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+      body: JSON.stringify({ player_name: name.toUpperCase().trim(), score: sc, level_reached: lvl })
+    });
+    await fetchLeaderboard();
+  } catch(_) {}
+}
+
+function showNameEntry(sc, lvl) {
+  pendingEntry = { sc, lvl };
+  nameEntryActive = true;
+  document.getElementById('score-display').textContent = `Score: ${sc}  •  Level: ${lvl}`;
+  const inp = document.getElementById('player-name-input');
+  inp.value = '';
+  document.getElementById('name-entry').style.display = 'block';
+  setTimeout(() => inp.focus(), 50);
+}
+
+function hideNameEntry() {
+  nameEntryActive = false;
+  pendingEntry = null;
+  document.getElementById('name-entry').style.display = 'none';
+}
+
+// Name entry button wiring
+document.getElementById('player-name-input').addEventListener('keydown', async e => {
+  e.stopPropagation();
+  if (e.key === 'Enter') {
+    const name = document.getElementById('player-name-input').value.trim();
+    if (!name) return;
+    if (pendingEntry) await submitScore(name, pendingEntry.sc, pendingEntry.lvl);
+    hideNameEntry(); gstate = S.TITLE;
+  }
+  if (e.key === 'Escape') { hideNameEntry(); gstate = S.TITLE; }
+});
+document.getElementById('player-name-input').addEventListener('keyup', e => e.stopPropagation());
+document.getElementById('submit-score-btn').addEventListener('click', async () => {
+  const name = document.getElementById('player-name-input').value.trim();
+  if (!name) return;
+  if (pendingEntry) await submitScore(name, pendingEntry.sc, pendingEntry.lvl);
+  hideNameEntry(); gstate = S.TITLE;
+});
+document.getElementById('skip-score-btn').addEventListener('click', () => {
+  hideNameEntry(); gstate = S.TITLE;
+});
+
 // ── GAME STATE ─────────────────────────────────────────────────────────────
 let gstate, lvlIdx, sharedHP, score, t, lvlT, introT;
 let players, pipes, fires, vandals, toolkits, activeP, swings;
@@ -182,6 +280,8 @@ const S = {TITLE:'T', PLAYING:'P', WIN:'W', OVER:'O', VICTORY:'V'};
 function initGame() {
   lvlIdx = 0; score = 0; sharedHP = 100; t = 0;
   gstate = S.TITLE;
+  fetchLeaderboard();
+  if (!initGame._poll) initGame._poll = setInterval(fetchLeaderboard, 15000);
 }
 
 function initLevel(i) {
@@ -352,7 +452,7 @@ function update(dt) {
   }
 
   sharedHP = clamp(sharedHP,0,100);
-  if (sharedHP<=0) { gstate=S.OVER; Audio.gameOver(); return; }
+  if (sharedHP<=0) { gstate=S.OVER; Audio.gameOver(); showNameEntry(score, lvlIdx+1); return; }
 
   // HP low warning beep (every 1.2s when HP < 25)
   hpWarnT -= dt;
@@ -395,12 +495,18 @@ function update(dt) {
     if (winDelayT <= 0) {
       pendingWin = false;
       Audio.levelClear();
-      gstate = lvlIdx>=LEVEL_DEFS.length-1 ? S.VICTORY : S.WIN;
+      if (lvlIdx >= LEVEL_DEFS.length-1) {
+        gstate = S.VICTORY;
+        showNameEntry(score, lvlIdx+1);
+      } else {
+        gstate = S.WIN;
+      }
     }
   }
 }
 
 function menuInput() {
+  if (nameEntryActive) return;
   if (gstate===S.TITLE && (pressed('Enter')||pressed(' ')))  { initLevel(0); }
   if (gstate===S.WIN   && (pressed('Enter')||pressed(' ')))  { lvlIdx++; initLevel(lvlIdx); }
   if (gstate===S.OVER  && (pressed('r')||pressed('R')))       { sharedHP=100; initLevel(lvlIdx); }
@@ -708,6 +814,43 @@ function drawTitle() {
 
   ctx.fillStyle='#37474f'; ctx.font='11px Courier New';
   ctx.fillText('WASD/ARROWS: move  |  TAB: switch brother  |  SPACE: wrench',W/2,H-22);
+  ctx.textAlign='left';
+
+  // Leaderboard panel (right side)
+  ctx.fillStyle='rgba(6,6,24,0.88)';
+  ctx.fillRect(442, 44, 350, 290);
+  ctx.strokeStyle='#1a3a5c'; ctx.lineWidth=1;
+  ctx.strokeRect(442, 44, 350, 290);
+
+  ctx.textAlign='center';
+  ctx.shadowBlur=10; ctx.shadowColor='#29b6f6';
+  ctx.fillStyle='#29b6f6'; ctx.font='bold 12px Courier New';
+  ctx.fillText('▲ LIVE LEADERBOARD ▲', 617, 68);
+  ctx.shadowBlur=0;
+
+  ctx.strokeStyle='#1a3a5c'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(452,76); ctx.lineTo(782,76); ctx.stroke();
+
+  if (leaderboard.length === 0) {
+    ctx.fillStyle='#37474f'; ctx.font='11px Courier New';
+    ctx.fillText('No scores yet — be the first!', 617, 175);
+  } else {
+    const rankCol = ['#ffd54f','#b0bec5','#a1887f'];
+    leaderboard.slice(0,9).forEach((e,i) => {
+      const y = 100 + i * 26;
+      ctx.fillStyle = i<3 ? rankCol[i] : '#546e7a';
+      ctx.font = 'bold 11px Courier New';
+      ctx.textAlign='right'; ctx.fillText(`${i+1}.`, 464, y);
+      ctx.textAlign='left';
+      ctx.fillStyle = i===0 ? '#ffd54f' : '#e0f7fa';
+      ctx.fillText((e.player_name||'???').substring(0,10), 472, y);
+      ctx.textAlign='right';
+      ctx.fillStyle='#4fc3f7'; ctx.font='bold 11px Courier New';
+      ctx.fillText(e.score, 748, y);
+      ctx.fillStyle='#37474f'; ctx.font='10px Courier New';
+      ctx.fillText(`L${e.level_reached}`, 782, y);
+    });
+  }
   ctx.textAlign='left';
 }
 
