@@ -211,10 +211,10 @@ const Audio = (() => {
       const a = ac();
       this._drone = { oscs: [], master: null, iv: null, step: 0 };
 
-      // Master gain – fades in slowly
+      // Master gain – fades in
       const master = a.createGain();
       master.gain.setValueAtTime(0.001, a.currentTime);
-      master.gain.linearRampToValueAtTime(0.2, a.currentTime + 3.5);
+      master.gain.linearRampToValueAtTime(0.3, a.currentTime + 1.2);
       master.connect(a.destination);
       this._drone.master = master;
 
@@ -595,6 +595,7 @@ function update(dt) {
 
 function menuInput() {
   if (nameEntryActive) return;
+  if (gstate===S.TITLE) Audio.droneStart();
   if (gstate===S.TITLE && (pressed('Enter')||pressed(' ')))  { initLevel(0); }
   if (gstate===S.WIN   && (pressed('Enter')||pressed(' ')))  { lvlIdx++; initLevel(lvlIdx); }
   if (gstate===S.OVER  && (pressed('r')||pressed('R')))       { sharedHP=100; initLevel(lvlIdx); }
@@ -968,13 +969,11 @@ function loop(ts) {
 initGame();
 requestAnimationFrame(loop);
 
-// Start title music immediately; if browser blocks autoplay (suspended context),
-// the pad oscillators are already created and will play the moment the user's
-// first gesture resumes the AudioContext via Audio.resume() in the keydown handler.
-Audio.droneStart();
+// Browsers block audio until first user gesture. On first interaction,
+// resume the AudioContext so the title drone (started by menuInput) can play.
 (function() {
   const go = () => {
-    Audio.droneStart(); // no-op if already running
+    Audio.resume();
     ['click','keydown','touchstart'].forEach(ev => document.removeEventListener(ev, go, true));
   };
   ['click','keydown','touchstart'].forEach(ev => document.addEventListener(ev, go, true));
