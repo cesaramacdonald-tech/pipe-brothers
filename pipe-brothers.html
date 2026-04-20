@@ -407,6 +407,8 @@ function initGame() {
 
 function initLevel(i) {
   Audio.droneStop();
+  for (const k in keys) delete keys[k];
+  for (const k in jp)   delete jp[k];
   const def = LEVEL_DEFS[i];
   lvlT = 0; introT = 2.5; swings = []; hpWarnT = 0; dripT = 0; pendingWin = false; winDelayT = 0;
   setTimeout(() => Audio.levelStart(), 120);
