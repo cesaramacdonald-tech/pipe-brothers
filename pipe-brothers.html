@@ -103,7 +103,7 @@ const LEVEL_DEFS = [
     leakingNodes: [0,2,7,11,14],
     fires: [{c:6,r:2},{c:18,r:7},{c:18,r:16}],
     vandals: [
-      {c:3,r:12, patrol:[{c:3,r:12},{c:9,r:12}]},
+      {c:9,r:16, patrol:[{c:9,r:16},{c:15,r:16}]},
       {c:21,r:7, patrol:[{c:21,r:7},{c:21,r:12}]},
     ],
     toolkits: [{c:12,r:7},{c:6,r:16}],
@@ -596,7 +596,7 @@ function update(dt) {
 function menuInput() {
   if (nameEntryActive) return;
   if (gstate===S.TITLE) Audio.droneStart();
-  if (gstate===S.TITLE && (pressed('Enter')||pressed(' ')))  { initLevel(0); }
+  if (gstate===S.TITLE && (pressed('Enter')||pressed(' ')))  { sharedHP=100; score=0; lvlIdx=0; initLevel(0); }
   if (gstate===S.WIN   && (pressed('Enter')||pressed(' ')))  { lvlIdx++; initLevel(lvlIdx); }
   if (gstate===S.OVER  && (pressed('r')||pressed('R')))       { sharedHP=100; initLevel(lvlIdx); }
   if (gstate===S.VICTORY&&(pressed('Enter')||pressed(' '))) { initGame(); }
