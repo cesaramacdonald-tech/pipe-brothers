@@ -576,7 +576,7 @@ function update(dt) {
   }
 
   sharedHP = clamp(sharedHP,0,100);
-  if (sharedHP<=0) { gstate=S.OVER; Audio.gameOver(); showNameEntry(score, lvlIdx+1); return; }
+  if (sharedHP<=0) { gstate=S.OVER; Audio.gameOver(); return; }
 
   // HP low warning beep (every 1.2s when HP < 25)
   hpWarnT -= dt;
@@ -635,6 +635,7 @@ function menuInput() {
   if (gstate===S.TITLE && (pressed('Enter')||pressed(' ')))  { sharedHP=100; score=0; lvlIdx=0; initLevel(0); }
   if (gstate===S.WIN   && (pressed('Enter')||pressed(' ')))  { lvlIdx++; initLevel(lvlIdx); }
   if (gstate===S.OVER  && (pressed('r')||pressed('R')))       { sharedHP=100; initLevel(lvlIdx); }
+  if (gstate===S.OVER  && (pressed('q')||pressed('Q')))       { showNameEntry(score, lvlIdx+1); }
   if (gstate===S.VICTORY&&(pressed('Enter')||pressed(' '))) { initGame(); }
 }
 
@@ -645,7 +646,7 @@ function render() {
   drawMap(); drawPipeNet(); drawPipes(); drawFires();
   drawToolkits(); drawVandals(); drawPlayers(); drawSwings(); drawHUD();
   if (gstate===S.WIN)     drawOverlay('LEVEL CLEAR!','#66bb6a',`Score: ${score}  HP: ${Math.ceil(sharedHP)}`,'ENTER — next level');
-  if (gstate===S.OVER)    drawOverlay('PIPES BURST!','#ef5350',`Score: ${score}  Level: ${lvlIdx+1}`,'R — retry');
+  if (gstate===S.OVER)    drawOverlay('PIPES BURST!','#ef5350',`Score: ${score}  Level: ${lvlIdx+1}`,'R — retry  |  Q — quit & submit score');
   if (gstate===S.VICTORY) { drawOverlay('CITY SAVED!','#ffd54f',`FINAL SCORE: ${score}`,'ENTER — play again'); }
   if (gstate===S.PLAYING && introT>0) drawIntro();
 }
