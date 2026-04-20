@@ -209,22 +209,86 @@ const Audio = (() => {
     droneStart() {
       if (this._drone) return;
       const a = ac();
-      this._drone = [];
-      [[55,0.035],[82.4,0.02],[110,0.015],[165,0.01]].forEach(([f,v]) => {
+      this._drone = { oscs: [], master: null, iv: null, step: 0 };
+
+      // Master gain – fades in slowly
+      const master = a.createGain();
+      master.gain.setValueAtTime(0.001, a.currentTime);
+      master.gain.linearRampToValueAtTime(0.2, a.currentTime + 3.5);
+      master.connect(a.destination);
+      this._drone.master = master;
+
+      // Feedback delay — eerie depth
+      const dly = a.createDelay(1.5); dly.delayTime.value = 0.32;
+      const dlyFB = a.createGain(); dlyFB.gain.value = 0.42;
+      const dlyWet = a.createGain(); dlyWet.gain.value = 0.38;
+      dly.connect(dlyFB); dlyFB.connect(dly);
+      dly.connect(dlyWet); dlyWet.connect(master);
+      this._drone._dly = dly;
+
+      // Slow LFO sweeping the filter (0.11 Hz ≈ 9s cycle)
+      const lfo = a.createOscillator(); lfo.frequency.value = 0.11;
+      const lfoG = a.createGain(); lfoG.gain.value = 550;
+      lfo.connect(lfoG);
+      lfo.start(); this._drone.oscs.push(lfo);
+
+      // Dark low-pass filter — thick, murky tone
+      const filt = a.createBiquadFilter();
+      filt.type = 'lowpass'; filt.frequency.value = 950; filt.Q.value = 6;
+      lfoG.connect(filt.frequency);
+      filt.connect(master);
+
+      // Am pad: A2(110) C3(130.8) E3(164.8) A1(55) — detuned sawtooth layers
+      [[110,-11,0.055],[110,13,0.042],[130.8,-8,0.045],[130.8,10,0.033],
+       [164.8,-6,0.032],[164.8,12,0.024],[82.4,0,0.048],[55,0,0.062]].forEach(([f,d,v]) => {
         const osc = a.createOscillator(), g = a.createGain();
-        osc.type = 'sine'; osc.frequency.value = f; g.gain.value = v;
-        osc.connect(g); g.connect(a.destination); osc.start();
-        this._drone.push({osc, g});
+        osc.type = f <= 82.4 ? 'sine' : 'sawtooth';
+        osc.frequency.value = f; osc.detune.value = d; g.gain.value = v;
+        osc.connect(g); g.connect(filt); osc.start();
+        this._drone.oscs.push(osc);
       });
+
+      // 8-step sequencer @ 116 BPM
+      // Bass: A1 G1 F1 root movement, minor & brooding
+      // Lead: sparse eerie A-minor arpeggio through delay
+      const BPM = 116, B = 60 / BPM;
+      const bassSeq = [55, null, 55, 49, null, 44, 55, null]; // A1 - A1 G1 - F1 A1 -
+      const leadSeq = [220, null, 196, null, 165, null, 196, 220]; // A3 - G3 - E3 - G3 A3
+
+      const note = (freq, t, dur, type, vol, dst) => {
+        const o = a.createOscillator(), g = a.createGain();
+        o.type = type; o.frequency.value = freq;
+        g.gain.setValueAtTime(0.001, t);
+        g.gain.linearRampToValueAtTime(vol, t + 0.018);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+        o.connect(g); g.connect(dst);
+        o.start(t); o.stop(t + dur + 0.05);
+      };
+
+      const tick = () => {
+        if (!this._drone || a.state !== 'running') return;
+        const t = a.currentTime, s = this._drone.step % 8;
+        if (bassSeq[s]) {
+          note(bassSeq[s],   t, B * 0.82, 'sawtooth', 0.26, master);
+          note(bassSeq[s]/2, t, B * 0.72, 'sine',     0.14, master);
+        }
+        if (leadSeq[s]) note(leadSeq[s], t, B * 0.44, 'square', 0.042, dly);
+        this._drone.step++;
+      };
+
+      tick();
+      this._drone.iv = setInterval(tick, B * 1000);
     },
     droneStop() {
       if (!this._drone) return;
-      const a = ac();
-      this._drone.forEach(({osc, g}) => {
-        g.gain.setValueAtTime(g.gain.value, a.currentTime);
-        g.gain.exponentialRampToValueAtTime(0.0001, a.currentTime + 1.0);
-        try { osc.stop(a.currentTime + 1.05); } catch(_) {}
-      });
+      if (this._drone.iv) clearInterval(this._drone.iv);
+      const a = ac(), now = a.currentTime;
+      if (this._drone.master) {
+        this._drone.master.gain.setValueAtTime(this._drone.master.gain.value, now);
+        this._drone.master.gain.exponentialRampToValueAtTime(0.0001, now + 1.5);
+      }
+      const oscs = this._drone.oscs;
+      setTimeout(() => oscs.forEach(o => { try { o.stop(); } catch(_){} }), 1600);
       this._drone = null;
     },
   };
@@ -531,7 +595,6 @@ function update(dt) {
 
 function menuInput() {
   if (nameEntryActive) return;
-  if (gstate===S.TITLE) Audio.droneStart();
   if (gstate===S.TITLE && (pressed('Enter')||pressed(' ')))  { initLevel(0); }
   if (gstate===S.WIN   && (pressed('Enter')||pressed(' ')))  { lvlIdx++; initLevel(lvlIdx); }
   if (gstate===S.OVER  && (pressed('r')||pressed('R')))       { sharedHP=100; initLevel(lvlIdx); }
@@ -904,6 +967,18 @@ function loop(ts) {
 }
 initGame();
 requestAnimationFrame(loop);
+
+// Start title music immediately; if browser blocks autoplay (suspended context),
+// the pad oscillators are already created and will play the moment the user's
+// first gesture resumes the AudioContext via Audio.resume() in the keydown handler.
+Audio.droneStart();
+(function() {
+  const go = () => {
+    Audio.droneStart(); // no-op if already running
+    ['click','keydown','touchstart'].forEach(ev => document.removeEventListener(ev, go, true));
+  };
+  ['click','keydown','touchstart'].forEach(ev => document.addEventListener(ev, go, true));
+})();
 </script>
 </body>
 </html>
