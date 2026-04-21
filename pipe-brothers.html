@@ -138,7 +138,7 @@ const LEVEL_DEFS = [
   },
   // ── LEVEL 5 — SIEGE ────────────────────────────────────────────────────────
   {
-    drainRate: 0.95,
+    drainRate: 0.65,
     leakingNodes: [0,1,2,3,5,7,9,10,11,12,13,14],
     fires: [{c:6,r:2},{c:18,r:2},{c:6,r:7},{c:18,r:7},{c:12,r:12},{c:6,r:16},{c:18,r:16}],
     vandals: [
@@ -157,7 +157,7 @@ const LEVEL_DEFS = [
   // Centre fire wall at col 12 separates the brothers — close col-9 or col-15
   // pipes to extinguish fires and reopen the corridor.
   {
-    drainRate: 1.1,
+    drainRate: 0.75,
     leakingNodes: [0,1,4,5,8,9,2,3,6,7,10,11],
     fires: [{c:12,r:2},{c:12,r:7},{c:12,r:12}],
     vandals: [
@@ -642,7 +642,7 @@ function menuInput() {
   if (gstate===S.OVER  && (pressed('r')||pressed('R'))) {
     sharedHP = 100;
     if (lives > 0) { initLevel(lvlIdx); }
-    else { lives=3; score=0; lvlIdx=0; initLevel(0); }
+    else { lives=3; initLevel(lvlIdx); }
   }
   if (gstate===S.OVER  && (pressed('q')||pressed('Q')))       { showNameEntry(score, lvlIdx+1); }
   if (gstate===S.VICTORY&&(pressed('Enter')||pressed(' '))) { initGame(); }
