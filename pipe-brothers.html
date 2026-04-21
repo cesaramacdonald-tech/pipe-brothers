@@ -123,7 +123,7 @@ const LEVEL_DEFS = [
     p1:{c:3,r:2}, p2:{c:21,r:16},
   },
   {
-    drainRate: 1.0,
+    drainRate: 0.72,
     leakingNodes: [0,1,2,3,4,6,8,10,12,14],
     fires: [{c:6,r:2},{c:12,r:2},{c:6,r:7},{c:18,r:7},{c:6,r:12},{c:18,r:16}],
     vandals: [
@@ -138,7 +138,7 @@ const LEVEL_DEFS = [
   },
   // ── LEVEL 5 — SIEGE ────────────────────────────────────────────────────────
   {
-    drainRate: 1.3,
+    drainRate: 0.95,
     leakingNodes: [0,1,2,3,5,7,9,10,11,12,13,14],
     fires: [{c:6,r:2},{c:18,r:2},{c:6,r:7},{c:18,r:7},{c:12,r:12},{c:6,r:16},{c:18,r:16}],
     vandals: [
@@ -157,7 +157,7 @@ const LEVEL_DEFS = [
   // Centre fire wall at col 12 separates the brothers — close col-9 or col-15
   // pipes to extinguish fires and reopen the corridor.
   {
-    drainRate: 1.5,
+    drainRate: 1.1,
     leakingNodes: [0,1,4,5,8,9,2,3,6,7,10,11],
     fires: [{c:12,r:2},{c:12,r:7},{c:12,r:12}],
     vandals: [
@@ -391,7 +391,7 @@ document.getElementById('skip-score-btn').addEventListener('click', () => {
 });
 
 // ── GAME STATE ─────────────────────────────────────────────────────────────
-let gstate, lvlIdx, sharedHP, score, t, lvlT, introT;
+let gstate, lvlIdx, sharedHP, score, lives, t, lvlT, introT;
 let players, pipes, fires, vandals, toolkits, activeP, swings;
 let hpWarnT = 0, dripT = 0, winDelayT = 0, pendingWin = false;
 
@@ -399,7 +399,7 @@ const S = {TITLE:'T', PLAYING:'P', WIN:'W', OVER:'O', VICTORY:'V'};
 
 // ── INIT ───────────────────────────────────────────────────────────────────
 function initGame() {
-  lvlIdx = 0; score = 0; sharedHP = 100; t = 0;
+  lvlIdx = 0; score = 0; sharedHP = 100; lives = 3; t = 0;
   gstate = S.TITLE;
   fetchLeaderboard();
   if (!initGame._poll) initGame._poll = setInterval(fetchLeaderboard, 15000);
@@ -576,7 +576,12 @@ function update(dt) {
   }
 
   sharedHP = clamp(sharedHP,0,100);
-  if (sharedHP<=0) { gstate=S.OVER; Audio.gameOver(); return; }
+  if (sharedHP<=0) {
+    lives = Math.max(0, lives - 1);
+    gstate = S.OVER; Audio.gameOver();
+    hideNameEntry(); // safety: never let name entry block the retry screen
+    return;
+  }
 
   // HP low warning beep (every 1.2s when HP < 25)
   hpWarnT -= dt;
@@ -634,7 +639,11 @@ function menuInput() {
   if (gstate===S.TITLE) Audio.droneStart();
   if (gstate===S.TITLE && (pressed('Enter')||pressed(' ')))  { sharedHP=100; score=0; lvlIdx=0; initLevel(0); }
   if (gstate===S.WIN   && (pressed('Enter')||pressed(' ')))  { lvlIdx++; initLevel(lvlIdx); }
-  if (gstate===S.OVER  && (pressed('r')||pressed('R')))       { sharedHP=100; initLevel(lvlIdx); }
+  if (gstate===S.OVER  && (pressed('r')||pressed('R'))) {
+    sharedHP = 100;
+    if (lives > 0) { initLevel(lvlIdx); }
+    else { lives=3; score=0; lvlIdx=0; initLevel(0); }
+  }
   if (gstate===S.OVER  && (pressed('q')||pressed('Q')))       { showNameEntry(score, lvlIdx+1); }
   if (gstate===S.VICTORY&&(pressed('Enter')||pressed(' '))) { initGame(); }
 }
@@ -646,7 +655,7 @@ function render() {
   drawMap(); drawPipeNet(); drawPipes(); drawFires();
   drawToolkits(); drawVandals(); drawPlayers(); drawSwings(); drawHUD();
   if (gstate===S.WIN)     drawOverlay('LEVEL CLEAR!','#66bb6a',`Score: ${score}  HP: ${Math.ceil(sharedHP)}`,'ENTER — next level');
-  if (gstate===S.OVER)    drawOverlay('PIPES BURST!','#ef5350',`Score: ${score}  Level: ${lvlIdx+1}`,'R — retry  |  Q — quit & submit score');
+  if (gstate===S.OVER)    drawOverlay('PIPES BURST!','#ef5350',`Score: ${score}  Level: ${lvlIdx+1}`, lives>0 ? `R — retry  |  Q — submit score` : `R — start over  |  Q — submit score`);
   if (gstate===S.VICTORY) { drawOverlay('CITY SAVED!','#ffd54f',`FINAL SCORE: ${score}`,'ENTER — play again'); }
   if (gstate===S.PLAYING && introT>0) drawIntro();
 }
@@ -840,6 +849,22 @@ function drawSwings() {
   }
 }
 
+function drawWrenchIcon(x, y, active) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(Math.PI * 0.75);
+  const col = active ? '#ffd54f' : '#263238';
+  ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.lineCap = 'round';
+  // head ring
+  ctx.beginPath(); ctx.arc(0, 0, 5, 0.75, Math.PI*2-0.75); ctx.stroke();
+  // top jaw notch
+  ctx.beginPath(); ctx.moveTo(-2.5,-4.6); ctx.lineTo(2.5,-4.6); ctx.stroke();
+  // handle
+  ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.moveTo(3.5, 3.5); ctx.lineTo(11, 11); ctx.stroke();
+  ctx.restore();
+}
+
 function drawHUD() {
   // HP bar
   ctx.fillStyle='rgba(0,0,0,0.65)'; ctx.fillRect(8,8,204,22);
@@ -853,6 +878,12 @@ function drawHUD() {
   }
   ctx.fillStyle='#fff'; ctx.font='bold 10px Courier New';
   ctx.fillText(`HP ${Math.ceil(sharedHP)}`,14,23);
+
+  // Lives (wrench icons)
+  ctx.fillStyle='rgba(0,0,0,0.65)'; ctx.fillRect(8,34,80,22);
+  ctx.fillStyle='#546e7a'; ctx.font='bold 9px Courier New';
+  ctx.fillText('LIVES',12,47);
+  for (let i=0;i<3;i++) drawWrenchIcon(46+i*20, 45, i < lives);
 
   // Level + score
   ctx.font='bold 11px Courier New';
