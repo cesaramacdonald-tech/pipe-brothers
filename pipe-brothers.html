@@ -849,19 +849,44 @@ function drawSwings() {
   }
 }
 
-function drawWrenchIcon(x, y, active) {
+function drawWrenchSprite(cx, cy, active) {
+  const col  = active ? '#ffd54f' : '#37474f';
+  const glow = active ? '#ffe57f' : null;
   ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(Math.PI * 0.75);
-  const col = active ? '#ffd54f' : '#263238';
-  ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.lineCap = 'round';
-  // head ring
-  ctx.beginPath(); ctx.arc(0, 0, 5, 0.75, Math.PI*2-0.75); ctx.stroke();
-  // top jaw notch
-  ctx.beginPath(); ctx.moveTo(-2.5,-4.6); ctx.lineTo(2.5,-4.6); ctx.stroke();
-  // handle
-  ctx.lineWidth = 2.5;
-  ctx.beginPath(); ctx.moveTo(3.5, 3.5); ctx.lineTo(11, 11); ctx.stroke();
+  ctx.translate(cx, cy);
+  ctx.rotate(-0.28); // slight tilt like a real tool
+
+  if (active) { ctx.shadowBlur = 6; ctx.shadowColor = '#ffd54f'; }
+  ctx.fillStyle = col;
+
+  // ── Head: open-end ring (partial donut) ──────────────────────
+  const HR = 5.8, IR = 2.8, JAW = 0.68;
+  ctx.beginPath();
+  ctx.arc(0, -3, HR,  JAW, Math.PI*2 - JAW);      // outer arc CW
+  ctx.arc(0, -3, IR, Math.PI*2 - JAW, JAW, true); // inner arc CCW
+  ctx.closePath();
+  ctx.fill();
+
+  // Jaw closing bar (top flat bite of the wrench)
+  const jx1 = Math.cos(JAW), jy1 = Math.sin(JAW);
+  ctx.beginPath();
+  ctx.moveTo( IR*jx1,  -3 + IR*jy1);
+  ctx.lineTo( HR*jx1,  -3 + HR*jy1);
+  ctx.lineTo(-HR*jx1,  -3 - HR*jy1);
+  ctx.lineTo(-IR*jx1,  -3 - IR*jy1);
+  ctx.closePath();
+  ctx.fill();
+
+  // ── Handle: tapered body + rounded end ───────────────────────
+  ctx.beginPath();
+  ctx.moveTo(-2.8, -3 + IR - 0.5);
+  ctx.lineTo(-2.0, 11);
+  ctx.arc(0, 11, 2.0, Math.PI, 0);
+  ctx.lineTo( 2.8, -3 + IR - 0.5);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.shadowBlur = 0;
   ctx.restore();
 }
 
@@ -879,11 +904,9 @@ function drawHUD() {
   ctx.fillStyle='#fff'; ctx.font='bold 10px Courier New';
   ctx.fillText(`HP ${Math.ceil(sharedHP)}`,14,23);
 
-  // Lives (wrench icons)
-  ctx.fillStyle='rgba(0,0,0,0.65)'; ctx.fillRect(8,34,80,22);
-  ctx.fillStyle='#546e7a'; ctx.font='bold 9px Courier New';
-  ctx.fillText('LIVES',12,47);
-  for (let i=0;i<3;i++) drawWrenchIcon(46+i*20, 45, i < lives);
+  // Lives — wrench sprites, same row right of HP bar
+  ctx.fillStyle='rgba(0,0,0,0.65)'; ctx.fillRect(218,8,68,22);
+  for (let i=0;i<3;i++) drawWrenchSprite(232 + i*22, 19, i < lives);
 
   // Level + score
   ctx.font='bold 11px Courier New';
