@@ -169,10 +169,10 @@ const LEVEL_DEFS = [
   // pipes to extinguish fires and reopen the corridor.
   {
     name: 'SPLIT DISTRICT',
-    brief: ['A fire wall divides the map — each brother holds his own zone.', 'Seal pipes near col 12 to extinguish the fires and reunite.'],
+    brief: ['A fire wall divides the map — each brother holds his own zone.', 'Seal the pipes along col 12 to kill all 4 fires and finish the level.'],
     fireWall: { c: 12 },
     drainRate: 0.75,
-    leakingNodes: [0,1,4,5,8,9,2,3,6,7,10,11],
+    leakingNodes: [0,1,4,5,8,9,2,3,6,7,10,11,13,14],
     fires: [{c:12,r:2},{c:12,r:7},{c:12,r:12},{c:12,r:16}],
     vandals: [
       {c:3,r:2,  patrol:[{c:3,r:2},{c:3,r:12}],   speed:72},
