@@ -91,6 +91,8 @@ for (const r of STREET_ROWS)
 // ── LEVEL DEFINITIONS ──────────────────────────────────────────────────────
 const LEVEL_DEFS = [
   {
+    name: 'THE LEAK',
+    brief: ['Walk to a glowing blue node and press SPACE to seal it.', 'Knock out the vandal with SPACE to stop the damage.'],
     drainRate: 2.5,
     leakingNodes: [1, 5, 10],
     fires: [{c:6,r:7}],
@@ -99,6 +101,8 @@ const LEVEL_DEFS = [
     p1:{c:3,r:2}, p2:{c:15,r:7},
   },
   {
+    name: 'OUTBREAK',
+    brief: ['5 leaks across the map — split up with TAB to cover both sides.', 'Fires drain HP faster. Grab crates for a boost.'],
     drainRate: 1.0,
     leakingNodes: [0,2,7,11,14],
     fires: [{c:6,r:2},{c:18,r:7},{c:18,r:16}],
@@ -110,6 +114,8 @@ const LEVEL_DEFS = [
     p1:{c:3,r:7}, p2:{c:21,r:2},
   },
   {
+    name: 'INFERNO',
+    brief: ['Fires everywhere — use crate pickups to restore HP.', '8 leaks and 4 vandals. Keep moving.'],
     drainRate: 0.8,
     leakingNodes: [0,1,2,3,5,8,11,14],
     fires: [{c:6,r:2},{c:12,r:2},{c:6,r:12},{c:18,r:12},{c:12,r:16}],
@@ -123,6 +129,8 @@ const LEVEL_DEFS = [
     p1:{c:3,r:2}, p2:{c:21,r:16},
   },
   {
+    name: 'BLITZ',
+    brief: ['Faster vandals — knock them out before they re-open sealed pipes.', 'Three toolkits on the map. Use them wisely.'],
     drainRate: 0.72,
     leakingNodes: [0,1,2,3,4,6,8,10,12,14],
     fires: [{c:6,r:2},{c:12,r:2},{c:6,r:7},{c:18,r:7},{c:6,r:12},{c:18,r:16}],
@@ -138,6 +146,8 @@ const LEVEL_DEFS = [
   },
   // ── LEVEL 5 — SIEGE ────────────────────────────────────────────────────────
   {
+    name: 'SIEGE',
+    brief: ['You are completely surrounded — vandals on all sides.', 'Stay mobile. Seal leaks fast and clear paths to toolkits.'],
     drainRate: 0.65,
     leakingNodes: [0,1,2,3,5,7,9,10,11,12,13,14],
     fires: [{c:6,r:2},{c:18,r:2},{c:6,r:7},{c:18,r:7},{c:12,r:12},{c:6,r:16},{c:18,r:16}],
@@ -157,6 +167,8 @@ const LEVEL_DEFS = [
   // Centre fire wall at col 12 separates the brothers — close col-9 or col-15
   // pipes to extinguish fires and reopen the corridor.
   {
+    name: 'SPLIT DISTRICT',
+    brief: ['A fire wall divides the map — each brother holds his own zone.', 'Seal pipes near col 12 to extinguish the fires and reunite.'],
     drainRate: 0.75,
     leakingNodes: [0,1,4,5,8,9,2,3,6,7,10,11],
     fires: [{c:12,r:2},{c:12,r:7},{c:12,r:12}],
@@ -168,7 +180,6 @@ const LEVEL_DEFS = [
     ],
     toolkits: [{c:3,r:7},{c:21,r:7}],
     p1:{c:3,r:7}, p2:{c:21,r:7},
-    subtitle: 'SPLIT DISTRICT  —  TAB to cover both zones',
   },
 ];
 
@@ -410,7 +421,7 @@ function initLevel(i) {
   for (const k in keys) delete keys[k];
   for (const k in jp)   delete jp[k];
   const def = LEVEL_DEFS[i];
-  lvlT = 0; introT = 2.5; swings = []; hpWarnT = 0; dripT = 0; pendingWin = false; winDelayT = 0;
+  lvlT = 0; introT = 4.0; swings = []; hpWarnT = 0; dripT = 0; pendingWin = false; winDelayT = 0;
   setTimeout(() => Audio.levelStart(), 120);
 
   // Pipes
@@ -498,7 +509,11 @@ function update(dt) {
   if (gstate !== S.PLAYING) { menuInput(); return; }
 
   lvlT += dt;
-  if (introT > 0) introT -= dt;
+  if (introT > 0) {
+    introT -= dt;
+    if (lvlT > 0.6 && (pressed(' ') || pressed('Enter') || pressed('Tab'))) introT = 0;
+    return;
+  }
 
   // --- Input ---
   if (pressed('Tab')) { activeP = 1-activeP; Audio.switchPlayer(); }
@@ -936,26 +951,86 @@ function drawHUD() {
     ctx.fillStyle='#ce93d8'; ctx.font='11px Courier New';
     ctx.fillText(`\u25cf ${vc} vandal${vc>1?'s':''} active`,12,H-37);
   }
+
+  // Fading objective hint \u2014 visible for first 8s of a level
+  if (lvlT < 8) {
+    const fa = lvlT < 6 ? 1 : (8-lvlT)/2;
+    const d = LEVEL_DEFS[lvlIdx];
+    const hint = (d.brief && d.brief[0]) || 'Seal all leaking pipes before HP drops to zero.';
+    const hw = ctx.measureText(hint).width + 16;
+    ctx.globalAlpha = fa * 0.88;
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    ctx.fillRect(W/2 - hw/2, H-76, hw, 20);
+    ctx.fillStyle = '#b0bec5'; ctx.font = '11px Courier New'; ctx.textAlign = 'center';
+    ctx.fillText(hint, W/2, H-62);
+    ctx.textAlign = 'left'; ctx.globalAlpha = 1;
+  }
 }
 
 function drawIntro() {
   const a = introT>0.5 ? 1 : introT/0.5;
-  ctx.fillStyle=`rgba(0,0,0,${a*0.72})`;
-  ctx.fillRect(0,0,W,H);
-  ctx.globalAlpha=a;
-  ctx.textAlign='center';
-  ctx.shadowBlur=20; ctx.shadowColor='#4fc3f7';
-  ctx.fillStyle='#e0f7fa'; ctx.font='bold 40px Courier New';
-  ctx.fillText(`LEVEL ${lvlIdx+1}`,W/2,H/2-18);
-  ctx.shadowBlur=0;
-  const d=LEVEL_DEFS[lvlIdx];
-  ctx.fillStyle='#90a4ae'; ctx.font='14px Courier New';
-  ctx.fillText(`${d.leakingNodes.length} leaks  ·  ${d.fires.length} fires  ·  ${d.vandals.length} vandals`,W/2,H/2+22);
-  if (d.subtitle) {
-    ctx.fillStyle='#ff7043'; ctx.font='bold 13px Courier New';
-    ctx.fillText(d.subtitle, W/2, H/2+52);
-  }
-  ctx.textAlign='left'; ctx.globalAlpha=1;
+  ctx.globalAlpha = a;
+
+  // dim backdrop
+  ctx.fillStyle = `rgba(0,0,0,0.80)`;
+  ctx.fillRect(0, 0, W, H);
+
+  const d = LEVEL_DEFS[lvlIdx];
+  const cx = W/2, cy = H/2;
+
+  // card background
+  const cw = 480, ch = 220;
+  ctx.fillStyle = 'rgba(10,20,35,0.95)';
+  ctx.fillRect(cx-cw/2, cy-ch/2, cw, ch);
+  ctx.strokeStyle = '#1e4a6e'; ctx.lineWidth = 1;
+  ctx.strokeRect(cx-cw/2, cy-ch/2, cw, ch);
+
+  // coloured top bar
+  ctx.fillStyle = '#0d2a42';
+  ctx.fillRect(cx-cw/2, cy-ch/2, cw, 36);
+
+  ctx.textAlign = 'center';
+
+  // level badge + name
+  ctx.font = 'bold 11px Courier New';
+  ctx.fillStyle = '#546e7a';
+  ctx.fillText(`LEVEL ${lvlIdx+1}`, cx-cw/2+38, cy-ch/2+23);
+  ctx.shadowBlur = 14; ctx.shadowColor = '#4fc3f7';
+  ctx.fillStyle = '#e0f7fa'; ctx.font = 'bold 17px Courier New';
+  ctx.fillText(d.name || `LEVEL ${lvlIdx+1}`, cx+10, cy-ch/2+23);
+  ctx.shadowBlur = 0;
+
+  // divider
+  ctx.strokeStyle = '#1e4a6e'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(cx-cw/2+12, cy-ch/2+36); ctx.lineTo(cx+cw/2-12, cy-ch/2+36); ctx.stroke();
+
+  // brief lines
+  const brief = d.brief || ['Seal all leaking pipes before HP drops to zero.'];
+  ctx.fillStyle = '#cfd8dc'; ctx.font = '13px Courier New';
+  brief.forEach((line, i) => ctx.fillText(line, cx, cy-ch/2+68 + i*22));
+
+  // stats row
+  const statY = cy + ch/2 - 54;
+  const stats = [
+    { icon: '▼', val: `${d.leakingNodes.length} LEAKS`,  col: '#29b6f6' },
+    { icon: '▲', val: `${d.fires.length} FIRES`,         col: '#ff7043' },
+    { icon: '●', val: `${d.vandals.length} VANDALS`,     col: '#ce93d8' },
+  ];
+  stats.forEach((s, i) => {
+    const sx = cx + (i-1)*150;
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    ctx.fillRect(sx-55, statY-14, 110, 22);
+    ctx.fillStyle = s.col; ctx.font = 'bold 11px Courier New';
+    ctx.fillText(`${s.icon} ${s.val}`, sx, statY+2);
+  });
+
+  // controls footer
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.fillRect(cx-cw/2, cy+ch/2-26, cw, 26);
+  ctx.fillStyle = '#37474f'; ctx.font = '10px Courier New';
+  ctx.fillText('ARROWS/WASD  move  ·  SPACE  fix pipe / punch  ·  TAB  switch brother  ·  SPACE to skip', cx, cy+ch/2-10);
+
+  ctx.textAlign = 'left'; ctx.globalAlpha = 1;
 }
 
 function drawTitle() {
