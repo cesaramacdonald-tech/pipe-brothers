@@ -170,16 +170,18 @@ const LEVEL_DEFS = [
   {
     name: 'SPLIT DISTRICT',
     brief: ['A fire wall divides the map — each brother holds his own zone.', 'Seal pipes near col 12 to extinguish the fires and reunite.'],
+    fireWall: { c: 12 },
     drainRate: 0.75,
     leakingNodes: [0,1,4,5,8,9,2,3,6,7,10,11],
-    fires: [{c:12,r:2},{c:12,r:7},{c:12,r:12}],
+    fires: [{c:12,r:2},{c:12,r:7},{c:12,r:12},{c:12,r:16}],
     vandals: [
       {c:3,r:2,  patrol:[{c:3,r:2},{c:3,r:12}],   speed:72},
       {c:9,r:16, patrol:[{c:9,r:16},{c:3,r:16}],   speed:72},
       {c:21,r:2, patrol:[{c:21,r:2},{c:21,r:12}],  speed:72},
       {c:15,r:16,patrol:[{c:15,r:16},{c:21,r:16}],  speed:72},
+      {c:9,r:7,  patrol:[{c:9,r:7},{c:9,r:12}],    speed:72},
     ],
-    toolkits: [{c:3,r:7},{c:21,r:7}],
+    toolkits: [{c:3,r:7},{c:21,r:7},{c:9,r:12},{c:15,r:12}],
     p1:{c:3,r:7}, p2:{c:21,r:7},
   },
 ];
@@ -755,6 +757,25 @@ function drawPipes() {
 }
 
 function drawFires() {
+  // Fire wall strip (Level 6) — drawn behind individual fires
+  const fwDef = LEVEL_DEFS[lvlIdx].fireWall;
+  if (fwDef) {
+    const wallActive = fires.filter(f => f.active && f.c === fwDef.c).length;
+    if (wallActive > 0) {
+      const fx = fwDef.c * TS + TS/2;
+      const flk = 0.55 + 0.45 * Math.sin(t * 7);
+      const alpha = (wallActive / 4) * 0.38 * flk;
+      const g = ctx.createLinearGradient(fx-26, 0, fx+26, 0);
+      g.addColorStop(0,   'rgba(180,0,0,0)');
+      g.addColorStop(0.3, `rgba(255,60,0,${alpha})`);
+      g.addColorStop(0.5, `rgba(255,140,0,${alpha*1.5})`);
+      g.addColorStop(0.7, `rgba(255,60,0,${alpha})`);
+      g.addColorStop(1,   'rgba(180,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(fx-26, 0, 52, H);
+    }
+  }
+
   for (const f of fires) {
     if (!f.active) continue;
     const flk=0.75+0.25*Math.sin(t*11+f.c*7);
