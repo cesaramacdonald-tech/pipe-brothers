@@ -92,7 +92,8 @@ for (const r of STREET_ROWS)
 const LEVEL_DEFS = [
   {
     name: 'THE LEAK',
-    brief: ['Walk to a glowing blue node and press SPACE to seal it.', 'Knock out the vandal with SPACE to stop the damage.'],
+    brief: ['Find the glowing blue pipes — walk up to one and fix it.', 'Watch out for the vandal. You can punch it back with SPACE.'],
+    showControls: true,
     drainRate: 2.5,
     leakingNodes: [1, 5, 10],
     fires: [{c:6,r:7}],
@@ -971,64 +972,112 @@ function drawIntro() {
   const a = introT>0.5 ? 1 : introT/0.5;
   ctx.globalAlpha = a;
 
-  // dim backdrop
-  ctx.fillStyle = `rgba(0,0,0,0.80)`;
+  ctx.fillStyle = 'rgba(0,0,0,0.80)';
   ctx.fillRect(0, 0, W, H);
 
   const d = LEVEL_DEFS[lvlIdx];
   const cx = W/2, cy = H/2;
+  const cw = 500, ch = d.showControls ? 320 : 220;
 
-  // card background
-  const cw = 480, ch = 220;
+  // card
   ctx.fillStyle = 'rgba(10,20,35,0.95)';
   ctx.fillRect(cx-cw/2, cy-ch/2, cw, ch);
   ctx.strokeStyle = '#1e4a6e'; ctx.lineWidth = 1;
   ctx.strokeRect(cx-cw/2, cy-ch/2, cw, ch);
 
-  // coloured top bar
+  // header bar
   ctx.fillStyle = '#0d2a42';
   ctx.fillRect(cx-cw/2, cy-ch/2, cw, 36);
 
   ctx.textAlign = 'center';
 
   // level badge + name
-  ctx.font = 'bold 11px Courier New';
-  ctx.fillStyle = '#546e7a';
+  ctx.font = 'bold 11px Courier New'; ctx.fillStyle = '#546e7a';
   ctx.fillText(`LEVEL ${lvlIdx+1}`, cx-cw/2+38, cy-ch/2+23);
   ctx.shadowBlur = 14; ctx.shadowColor = '#4fc3f7';
   ctx.fillStyle = '#e0f7fa'; ctx.font = 'bold 17px Courier New';
   ctx.fillText(d.name || `LEVEL ${lvlIdx+1}`, cx+10, cy-ch/2+23);
   ctx.shadowBlur = 0;
 
-  // divider
+  // header divider
   ctx.strokeStyle = '#1e4a6e'; ctx.lineWidth = 1;
   ctx.beginPath(); ctx.moveTo(cx-cw/2+12, cy-ch/2+36); ctx.lineTo(cx+cw/2-12, cy-ch/2+36); ctx.stroke();
 
   // brief lines
   const brief = d.brief || ['Seal all leaking pipes before HP drops to zero.'];
   ctx.fillStyle = '#cfd8dc'; ctx.font = '13px Courier New';
-  brief.forEach((line, i) => ctx.fillText(line, cx, cy-ch/2+68 + i*22));
+  brief.forEach((line, i) => ctx.fillText(line, cx, cy-ch/2+66 + i*22));
+
+  // ── Controls block (Level 1 only) ─────────────────────────────────────────
+  if (d.showControls) {
+    const ctrlTop = cy - ch/2 + 118;
+
+    ctx.strokeStyle = '#1e3a50'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(cx-cw/2+16, ctrlTop); ctx.lineTo(cx+cw/2-16, ctrlTop); ctx.stroke();
+
+    ctx.fillStyle = '#455a64'; ctx.font = 'bold 9px Courier New'; ctx.textAlign = 'center';
+    ctx.fillText('HOW TO PLAY', cx, ctrlTop + 15);
+
+    // keycap helper
+    const kap = (x, y, lbl, w) => {
+      w = w || 22;
+      ctx.fillStyle = 'rgba(255,255,255,0.09)';
+      ctx.strokeStyle = 'rgba(255,255,255,0.30)'; ctx.lineWidth = 1;
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(x-w/2, y-10, w, 20, 3);
+      else ctx.rect(x-w/2, y-10, w, 20);
+      ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#e8e8e8'; ctx.font = 'bold 10px Courier New'; ctx.textAlign = 'center';
+      ctx.fillText(lbl, x, y+4);
+    };
+
+    const r1 = ctrlTop + 46;  // MOVE row (two sub-rows for cross pattern)
+    const r2 = ctrlTop + 88;  // SPACE row
+    const r3 = ctrlTop + 118; // TAB row
+
+    // MOVE — arrow cross + WASD cross
+    const ax = cx - 92; // center of ↓ key in arrow cluster
+    kap(ax, r1-13, '↑');
+    kap(ax-24, r1+7, '←'); kap(ax, r1+7, '↓'); kap(ax+24, r1+7, '→');
+    ctx.fillStyle = '#546e7a'; ctx.font = '11px Courier New'; ctx.textAlign = 'center';
+    ctx.fillText('or', ax+44, r1+11);
+    const wx = ax + 84; // center of S key in WASD cluster
+    kap(wx, r1-13, 'W');
+    kap(wx-24, r1+7, 'A'); kap(wx, r1+7, 'S'); kap(wx+24, r1+7, 'D');
+    ctx.fillStyle = '#b0bec5'; ctx.font = 'bold 13px Courier New'; ctx.textAlign = 'left';
+    ctx.fillText('Move', wx+40, r1+11);
+
+    // SPACE
+    kap(cx-108, r2, 'SPACE', 58);
+    ctx.fillStyle = '#b0bec5'; ctx.font = 'bold 13px Courier New'; ctx.textAlign = 'left';
+    ctx.fillText('Fix a leaking pipe  ·  Punch a vandal', cx-72, r2+5);
+
+    // TAB
+    kap(cx-108, r3, 'TAB', 38);
+    ctx.fillStyle = '#b0bec5'; ctx.font = 'bold 13px Courier New'; ctx.textAlign = 'left';
+    ctx.fillText('Switch between Rex and Max', cx-72, r3+5);
+  }
 
   // stats row
-  const statY = cy + ch/2 - 54;
+  const statY = cy + ch/2 - (d.showControls ? 44 : 52);
   const stats = [
-    { icon: '▼', val: `${d.leakingNodes.length} LEAKS`,  col: '#29b6f6' },
-    { icon: '▲', val: `${d.fires.length} FIRES`,         col: '#ff7043' },
-    { icon: '●', val: `${d.vandals.length} VANDALS`,     col: '#ce93d8' },
+    { icon: '▼', val: `${d.leakingNodes.length} LEAKS`, col: '#29b6f6' },
+    { icon: '▲', val: `${d.fires.length} FIRES`,        col: '#ff7043' },
+    { icon: '●', val: `${d.vandals.length} VANDALS`,    col: '#ce93d8' },
   ];
   stats.forEach((s, i) => {
-    const sx = cx + (i-1)*150;
+    const sx = cx + (i-1)*152;
     ctx.fillStyle = 'rgba(255,255,255,0.06)';
     ctx.fillRect(sx-55, statY-14, 110, 22);
-    ctx.fillStyle = s.col; ctx.font = 'bold 11px Courier New';
+    ctx.fillStyle = s.col; ctx.font = 'bold 11px Courier New'; ctx.textAlign = 'center';
     ctx.fillText(`${s.icon} ${s.val}`, sx, statY+2);
   });
 
-  // controls footer
+  // footer
   ctx.fillStyle = 'rgba(0,0,0,0.5)';
-  ctx.fillRect(cx-cw/2, cy+ch/2-26, cw, 26);
-  ctx.fillStyle = '#37474f'; ctx.font = '10px Courier New';
-  ctx.fillText('ARROWS/WASD  move  ·  SPACE  fix pipe / punch  ·  TAB  switch brother  ·  SPACE to skip', cx, cy+ch/2-10);
+  ctx.fillRect(cx-cw/2, cy+ch/2-24, cw, 24);
+  ctx.fillStyle = '#455a64'; ctx.font = '10px Courier New'; ctx.textAlign = 'center';
+  ctx.fillText('SPACE  or  ENTER  to begin', cx, cy+ch/2-9);
 
   ctx.textAlign = 'left'; ctx.globalAlpha = 1;
 }
